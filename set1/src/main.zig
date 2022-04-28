@@ -21,6 +21,18 @@ pub fn main() anyerror!void {
         try w.print("{c}", .{base_64_alphabet[sextet]});
     }
 }
+
+pub fn xor_bytes(src: []const u8, dst: []u8) !void {
+    if (src.len != dst.len) {
+        return error.LengthError;
+    }
+    var index: u8 = 0;
+    while (index < src.len) {
+        dst[index] = dst[index] ^ src[index];
+        index += 1;
+    }
+}
+
 pub fn hex_string_to_bytes(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
     var out_length: usize = @divFloor(hex_str.len, 2);
 
@@ -236,5 +248,27 @@ test "Odd Input Length Hex" {
     try std.testing.expectEqual(expected.len, sextets.len);
     for (sextets) |sextet, i| {
         try std.testing.expectEqual(base_64_alphabet[sextet], expected[i]);
+    }
+}
+
+test "XOR Cryptopals" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const challenge_2_input_1 = "1c0111001f010100061a024b53535009181c";
+    const challenge_2_input_2 = "686974207468652062756c6c277320657965";
+
+    const expected_xor_string = "746865206b696420646f6e277420706c6179";
+
+    const decoded_1 = try hex_string_to_bytes(allocator, challenge_2_input_1[0..]);
+    const decoded_2 = try hex_string_to_bytes(allocator, challenge_2_input_2[0..]);
+
+    const decoded_expected = try hex_string_to_bytes(allocator, expected_xor_string[0..]);
+
+    try xor_bytes(decoded_1, decoded_2);
+
+    for (decoded_2) |decoded_val, i| {
+        try std.testing.expectEqual(decoded_val, decoded_expected[i]);
     }
 }
