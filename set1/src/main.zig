@@ -2,24 +2,75 @@ const std = @import("std");
 
 const base_64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
+const expected_english_frequencies = [27]f32{ 0.082, 0.015, 0.028, 0.043, 0.13, 0.022, 0.02, 0.061, 0.07, 0.015, 0.077, 0.04, 0.024, 0.067, 0.075, 0.019, 0.0095, 0.06, 0.063, 0.091, 0.028, 0.0098, 0.024, 0.015, 0.02, 0.074, 0 };
+
+const NON_CHAR_WEIGHT: f32 = 10;
+
+const KeyScore = struct {
+    key: u8,
+    score: f32,
+};
+
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    //const example = "49276d206b696c6c696e6720796f757220627261696e206c696b65206120706f69736f6e6f7573206d757368726f6f6d";
+    const encoded_string = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
 
-    const example = "4d6";
-    const bytes = try hex_string_to_bytes(allocator, example[0..]);
+    _ = try min_score_single_byte_xor(allocator, encoded_string);
+}
 
-    const sextets = try octets_to_sextets(allocator, bytes);
+pub fn min_score_single_byte_xor(allocator: std.mem.Allocator, encoded_string: []const u8) !KeyScore {
+    const encoded_bytes = try hex_string_to_bytes(allocator, encoded_string[0..]);
 
-    const out = std.io.getStdOut();
-    var w = out.writer();
+    var key: u8 = 0;
+    var min_score: f32 = 1000000;
+    var best_key: u8 = 0;
 
-    for (sextets) |sextet| {
-        try w.print("{c}", .{base_64_alphabet[sextet]});
+    while (key < 0xFF) {
+        const plaintext = try xor_byte(allocator, encoded_bytes, key);
+        const score = score_as_english(plaintext);
+        if (score < min_score) {
+            min_score = score;
+            best_key = key;
+        }
+        key += 1;
     }
+
+    return KeyScore{ .key = best_key, .score = min_score };
+}
+
+pub fn score_as_english(bytes: []const u8) f32 {
+    var counts = [27]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    var index: u8 = 0;
+    var total: f32 = 0;
+
+    for (bytes) |char| {
+        if (char <= 'Z' and char >= 'A') {
+            index = char - 'A';
+        } else if (char <= 'z' and char >= 'a') {
+            index = char - 'a';
+        } else {
+            index = 26;
+        }
+        counts[index] += 1;
+        total += 1;
+    }
+
+    var total_error: f32 = 0;
+    var this_error: f32 = 0;
+    index = 0;
+    while (index < counts.len - 1) {
+        this_error = @intToFloat(f32, counts[index]) / total;
+        this_error -= expected_english_frequencies[index];
+        total_error += this_error * this_error;
+        index += 1;
+    }
+    var non_char_error: f32 = @intToFloat(f32, counts[26]) / total;
+    total_error += (non_char_error * NON_CHAR_WEIGHT);
+
+    return @sqrt(total_error);
 }
 
 pub fn xor_bytes(src: []const u8, dst: []u8) !void {
@@ -31,6 +82,17 @@ pub fn xor_bytes(src: []const u8, dst: []u8) !void {
         dst[index] = dst[index] ^ src[index];
         index += 1;
     }
+}
+
+pub fn xor_byte(allocator: std.mem.Allocator, src: []u8, key: u8) ![]u8 {
+    const out_buffer = try allocator.alloc(u8, src.len);
+
+    var index: u8 = 0;
+    while (index < src.len) {
+        out_buffer[index] = src[index] ^ key;
+        index += 1;
+    }
+    return out_buffer;
 }
 
 pub fn hex_string_to_bytes(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
@@ -271,4 +333,16 @@ test "XOR Cryptopals" {
     for (decoded_2) |decoded_val, i| {
         try std.testing.expectEqual(decoded_val, decoded_expected[i]);
     }
+}
+
+test "Single Byte XOR Cryptopals" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const encoded_string = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
+
+    const result = try min_score_single_byte_xor(allocator, encoded_string);
+
+    try std.testing.expectEqual(result.key, 88);
 }
