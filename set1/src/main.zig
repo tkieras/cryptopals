@@ -66,22 +66,30 @@ const BinaryData = struct {
     }
 };
 
-pub fn process_file_xor_single_byte() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var file = try std.fs.cwd().openFile("4.txt", .{});
+pub fn load_file(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList([]u8) {
+    var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
     var buf_reader = std.io.bufferedReader(file.reader());
     var reader = buf_reader.reader();
-
     var buf: [1024]u8 = undefined;
+    var list = std.ArrayList([]u8).init(allocator);
+
+    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        const line_copy = try allocator.alloc(u8, line.len);
+        std.mem.copy(u8, line_copy, line);
+        try list.append(line_copy);
+    }
+    return list;
+}
+
+pub fn search_file_for_xor_single_byte(allocator: std.mem.Allocator, path: []const u8) !void {
+    const file_lines = try load_file(allocator, path);
+
     var best_key_in_general: KeyScore = KeyScore{ .key = 0, .score = 1000000 };
     var best_line: BinaryData = undefined;
 
-    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+    for (file_lines.items) |line| {
         const data = try BinaryData.from_hex_string(allocator, line);
         const best_key = key_search_single_byte_xor(data);
 
@@ -108,10 +116,12 @@ pub fn main() anyerror!void {
 
     // std.log.info("result.key: {}", .{result.key});
     // try process_file_xor_single_byte();
-    const input_4 = "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
-    const data_4 = try BinaryData.from_bytes(allocator, input_4);
-    data_4.apply_repeating_byte_key("ICE");
-    try data_4.print_hex();
+    // const input_4 = "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
+    // const data_4 = try BinaryData.from_bytes(allocator, input_4);
+    // data_4.apply_repeating_byte_key("ICE");
+    // try data_4.print_hex();
+
+    try search_file_for_xor_single_byte(allocator, "4.txt");
 }
 
 pub fn key_search_single_byte_xor(data: BinaryData) KeyScore {
