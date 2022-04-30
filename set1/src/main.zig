@@ -42,35 +42,25 @@ pub fn min_score_single_byte_xor(allocator: std.mem.Allocator, encoded_string: [
 }
 
 pub fn score_as_english(bytes: []const u8) f32 {
-    var counts = [27]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    var index: u8 = 0;
-    var total: f32 = 0;
+    var total: u32 = 0;
 
     for (bytes) |char| {
-        if (char <= 'Z' and char >= 'A') {
-            index = char - 'A';
-        } else if (char <= 'z' and char >= 'a') {
-            index = char - 'a';
-        } else {
-            index = 26;
-        }
-        counts[index] += 1;
-        total += 1;
+        var score: u8 = switch (char) {
+            'e',
+            'E',
+            't',
+            'T',
+            'a',
+            'A',
+            'o',
+            'O',
+            => 2,
+            'i', 'I', 'n', 'N', 's', 'S', 'h', 'H' => 1,
+            else => 0,
+        };
+        total += score;
     }
-
-    var total_error: f32 = 0;
-    var this_error: f32 = 0;
-    index = 0;
-    while (index < counts.len - 1) {
-        this_error = @intToFloat(f32, counts[index]) / total;
-        this_error -= expected_english_frequencies[index];
-        total_error += this_error * this_error;
-        index += 1;
-    }
-    var non_char_error: f32 = @intToFloat(f32, counts[26]) / total;
-    total_error += (non_char_error * NON_CHAR_WEIGHT);
-
-    return @sqrt(total_error);
+    return 1 / @intToFloat(f32, total);
 }
 
 pub fn xor_bytes(src: []const u8, dst: []u8) !void {
