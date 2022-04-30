@@ -42,17 +42,32 @@ pub fn print(encoded_string: []const u8) !void {
     const out = std.io.getStdOut();
     var writer = out.writer();
     for (encoded_string) |byte_val| {
-        try writer.print("{c}", .{byte_val});
+        try writer.print("{x}", .{byte_val});
     }
     try writer.print("\n", .{});
 }
 
 pub fn main() anyerror!void {
-    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    // defer arena.deinit();
-    // const allocator = arena.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    try process_file_xor_single_byte();
+    //try process_file_xor_single_byte();
+    const input = "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
+
+    const output = try enc_repeating_key_xor(allocator, input[0..], "ICE");
+    try print(output);
+}
+
+pub fn enc_repeating_key_xor(allocator: std.mem.Allocator, plaintext: []const u8, key: []const u8) ![]u8 {
+    var output = try allocator.alloc(u8, plaintext.len);
+    var idx: u8 = 0;
+
+    while (idx < plaintext.len) {
+        output[idx] = plaintext[idx] ^ key[idx % key.len];
+        idx += 1;
+    }
+    return output;
 }
 
 pub fn min_score_single_byte_xor(allocator: std.mem.Allocator, encoded_string: []const u8) !KeyScore {
