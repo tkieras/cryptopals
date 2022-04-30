@@ -117,9 +117,9 @@ pub fn hamming_distance(a: []const u8, b: []const u8) !u32 {
 }
 
 pub fn main() anyerror!void {
-    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    // defer arena.deinit();
-    // const allocator = arena.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     // const input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
     // const data = try BinaryData.from_hex_string(allocator, input);
@@ -137,6 +137,21 @@ pub fn main() anyerror!void {
 
     //  try search_file_for_xor_single_byte(allocator, "4.txt");
 
+    const lines = try load_file(allocator, "6.txt");
+    var data_size: u32 = 0;
+    for (lines.items) |item| {
+        data_size += @intCast(u32, item.len);
+    }
+
+    var base64_encoded_data = try allocator.alloc(u8, data_size);
+    var idx: usize = 0;
+    for (lines.items) |item| {
+        std.mem.copy(u8, base64_encoded_data[idx..], item);
+        idx += item.len;
+    }
+    const bytes = try base_64_to_octets(allocator, base64_encoded_data);
+
+    const data = try BinaryData.from_bytes(allocator, bytes);
 }
 
 pub fn key_search_single_byte_xor(data: BinaryData) KeyScore {
