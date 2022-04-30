@@ -103,9 +103,9 @@ pub fn search_file_for_xor_single_byte(allocator: std.mem.Allocator, path: []con
 }
 
 pub fn main() anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // defer arena.deinit();
+    // const allocator = arena.allocator();
 
     // const input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
     // const data = try BinaryData.from_hex_string(allocator, input);
@@ -121,7 +121,8 @@ pub fn main() anyerror!void {
     // data_4.apply_repeating_byte_key("ICE");
     // try data_4.print_hex();
 
-    try search_file_for_xor_single_byte(allocator, "4.txt");
+    //  try search_file_for_xor_single_byte(allocator, "4.txt");
+
 }
 
 pub fn key_search_single_byte_xor(data: BinaryData) KeyScore {
@@ -262,6 +263,115 @@ pub fn octets_to_sextets(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 
         pos += 1;
     }
     return out_buffer;
+}
+
+pub fn base_64_to_sextets(allocator: std.mem.Allocator, base_64_string: []const u8) ![]u8 {
+    var base_64_alphabet_inverse = std.AutoHashMap(u8, u8).init(allocator);
+    for (base_64_alphabet) |char, i| {
+        try base_64_alphabet_inverse.put(char, @intCast(u8, i));
+    }
+    const sextets = try allocator.alloc(u8, base_64_string.len);
+
+    for (base_64_string) |char, i| {
+        sextets[i] = base_64_alphabet_inverse.get(char).?;
+    }
+    return sextets;
+}
+
+pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out_length: usize = @divFloor(input.len, 4);
+
+    out_length *= 3;
+
+    var padding: u8 = 0;
+    var rear_index: usize = input.len - 3;
+    while (rear_index < input.len) : (rear_index += 1) {
+        if (input[rear_index] == '=') {
+            padding += 1;
+        }
+    }
+    out_length -= padding;
+
+    const octets = try allocator.alloc(u8, out_length);
+
+    const sextets = try base_64_to_sextets(allocator, input);
+
+    var pos: u8 = 0;
+    var buffer: u8 = 0;
+    const take_masks = [_]u8{ 0x3F, 0x30, 0x3C, 0x3F };
+    const lshifts = [_]u3{ 2, 4, 6, 0 };
+    const rshifts = [_]u3{ 0, 4, 2, 0 };
+    const save_masks = [_]u8{ 0x0, 0x0F, 0x03, 0x0 };
+    var octet_val: u8 = 0;
+    var out_pos: usize = 0;
+
+    for (sextets) |sextet_val| {
+        if (pos == 0) {
+            buffer = (sextet_val & take_masks[pos]) << lshifts[pos];
+        } else {
+            octet_val = buffer | ((sextet_val & take_masks[pos]) >> rshifts[pos]);
+            buffer = (sextet_val & save_masks[pos]) << lshifts[pos];
+
+            if (out_pos < octets.len) {
+                octets[out_pos] = octet_val;
+                out_pos += 1;
+            }
+        }
+
+        pos = ((pos + 1) % 4);
+    }
+
+    return octets;
+}
+
+test "Sextets to Octets 3" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const input = "TWFu";
+    const expected = [_]u8{ 0x4d, 0x61, 0x6e };
+
+    const result = try base_64_to_octets(allocator, input);
+
+    try std.testing.expectEqualSlices(u8, expected[0..], result[0..]);
+}
+test "Sextets to Octets 2" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const input = "TWE=";
+    const expected = [_]u8{ 0x4d, 0x61 };
+
+    const result = try base_64_to_octets(allocator, input);
+
+    try std.testing.expectEqualSlices(u8, expected[0..], result[0..]);
+}
+test "Sextets to Octets 1" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const input = "TQ==";
+    const expected = [_]u8{0x4d};
+
+    const result = try base_64_to_octets(allocator, input);
+
+    try std.testing.expectEqualSlices(u8, expected[0..], result[0..]);
+}
+
+test "Base64 to Sextets" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const input = "ABC/=";
+
+    const expected = [_]u8{ 0, 1, 2, 63, 64 };
+
+    const sextets = try base_64_to_sextets(allocator, input);
+
+    for (sextets) |sextet_val, i| {
+        try std.testing.expectEqual(expected[i], sextet_val);
+    }
 }
 
 test "Cryptopals Test" {
