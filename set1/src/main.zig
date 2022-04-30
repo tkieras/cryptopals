@@ -102,6 +102,20 @@ pub fn search_file_for_xor_single_byte(allocator: std.mem.Allocator, path: []con
     try best_line.print_ascii();
 }
 
+pub fn hamming_distance(a: []const u8, b: []const u8) !u32 {
+    if (a.len != b.len) {
+        return error.LengthError;
+    }
+    var index: u8 = 0;
+    var total: u32 = 0;
+
+    while (index < a.len) {
+        total += @popCount(u8, a[index] ^ b[index]);
+        index += 1;
+    }
+    return total;
+}
+
 pub fn main() anyerror!void {
     // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     // defer arena.deinit();
@@ -324,6 +338,12 @@ pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 
     return octets;
 }
 
+test "Hamming Distance" {
+    const a = "this is a test";
+    const b = "wokka wokka!!!";
+
+    try std.testing.expectEqual(hamming_distance(a[0..], b[0..]), 37);
+}
 test "Sextets to Octets 3" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
