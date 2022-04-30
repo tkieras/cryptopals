@@ -7,6 +7,65 @@ const KeyScore = struct {
     score: f32,
 };
 
+const BinaryData = struct {
+    bytes: []u8 = undefined,
+    _bytes: []const u8 = undefined,
+    allocator: std.mem.Allocator,
+
+    fn apply_single_byte_key(self: *const BinaryData, key: u8) void {
+        for (self.bytes) |byte_val, i| {
+            self.bytes[i] = byte_val ^ key;
+        }
+    }
+    fn apply_repeating_byte_key(self: *const BinaryData, key: []const u8) void {
+        for (self.bytes) |byte_val, i| {
+            self.bytes[i] = byte_val ^ key[i % key.len];
+        }
+    }
+    fn reset_bytes(self: *const BinaryData) void {
+        for (self._bytes) |byte_val, i| {
+            self.bytes[i] = byte_val;
+        }
+    }
+    fn from_hex_string(allocator: std.mem.Allocator, hex_str: []const u8) !BinaryData {
+        const bytes = try hex_string_to_bytes(allocator, hex_str);
+        const bytes_const = try allocator.alloc(u8, bytes.len);
+        std.mem.copy(u8, bytes_const, bytes);
+        const result = BinaryData{ .bytes = bytes, ._bytes = bytes_const, .allocator = allocator };
+        return result;
+    }
+    fn from_bytes(allocator: std.mem.Allocator, bytes: []const u8) !BinaryData {
+        const bytes_var = try allocator.alloc(u8, bytes.len);
+        std.mem.copy(u8, bytes_var, bytes);
+        const bytes_const = try allocator.alloc(u8, bytes.len);
+        std.mem.copy(u8, bytes_const, bytes);
+        const result = BinaryData{ .bytes = bytes_var, ._bytes = bytes_const, .allocator = allocator };
+        return result;
+    }
+
+    fn print_hex(self: *const BinaryData) !void {
+        const out = std.io.getStdOut();
+
+        var writer = out.writer();
+
+        for (self.bytes) |byte_val| {
+            try writer.print("{x}", .{byte_val});
+        }
+        try writer.print("\n", .{});
+    }
+
+    fn print_ascii(self: *const BinaryData) !void {
+        const out = std.io.getStdOut();
+
+        var writer = out.writer();
+
+        for (self.bytes) |byte_val| {
+            try writer.print("{c}", .{byte_val});
+        }
+        try writer.print("\n", .{});
+    }
+};
+
 pub fn process_file_xor_single_byte() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -20,31 +79,19 @@ pub fn process_file_xor_single_byte() !void {
 
     var buf: [1024]u8 = undefined;
     var best_key_in_general: KeyScore = KeyScore{ .key = 0, .score = 1000000 };
-    var best_line: []u8 = undefined;
+    var best_line: BinaryData = undefined;
 
     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-        const best_key = try min_score_single_byte_xor(allocator, line);
+        const data = try BinaryData.from_hex_string(allocator, line);
+        const best_key = key_search_single_byte_xor(data);
 
         if (best_key.score < best_key_in_general.score) {
             best_key_in_general = best_key;
-            var line_copy = try allocator.alloc(u8, line.len);
-            std.mem.copy(u8, line_copy, line);
-            best_line = line_copy;
+            best_line = try BinaryData.from_hex_string(allocator, line);
         }
     }
-
-    const line_bytes = try hex_string_to_bytes(allocator, best_line);
-    const decoded = try xor_byte(allocator, line_bytes, best_key_in_general.key);
-    try print(decoded);
-}
-
-pub fn print(encoded_string: []const u8) !void {
-    const out = std.io.getStdOut();
-    var writer = out.writer();
-    for (encoded_string) |byte_val| {
-        try writer.print("{x}", .{byte_val});
-    }
-    try writer.print("\n", .{});
+    best_line.apply_single_byte_key(best_key_in_general.key);
+    try best_line.print_ascii();
 }
 
 pub fn main() anyerror!void {
@@ -52,39 +99,36 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    //try process_file_xor_single_byte();
-    const input = "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
+    // const input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
+    // const data = try BinaryData.from_hex_string(allocator, input);
 
-    const output = try enc_repeating_key_xor(allocator, input[0..], "ICE");
-    try print(output);
+    // try data.print_hex();
+
+    // const result = key_search_single_byte_xor(data);
+
+    // std.log.info("result.key: {}", .{result.key});
+    // try process_file_xor_single_byte();
+    const input_4 = "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
+    const data_4 = try BinaryData.from_bytes(allocator, input_4);
+    data_4.apply_repeating_byte_key("ICE");
+    try data_4.print_hex();
 }
 
-pub fn enc_repeating_key_xor(allocator: std.mem.Allocator, plaintext: []const u8, key: []const u8) ![]u8 {
-    var output = try allocator.alloc(u8, plaintext.len);
-    var idx: u8 = 0;
-
-    while (idx < plaintext.len) {
-        output[idx] = plaintext[idx] ^ key[idx % key.len];
-        idx += 1;
-    }
-    return output;
-}
-
-pub fn min_score_single_byte_xor(allocator: std.mem.Allocator, encoded_string: []const u8) !KeyScore {
-    const encoded_bytes = try hex_string_to_bytes(allocator, encoded_string);
-
+pub fn key_search_single_byte_xor(data: BinaryData) KeyScore {
     var key: u8 = 0;
     var min_score: f32 = 1000000;
     var best_key: u8 = 0;
 
     while (key < 0xFF) {
-        const plaintext = try xor_byte(allocator, encoded_bytes, key);
-        const score = score_as_english(plaintext);
+        data.apply_single_byte_key(key);
+
+        const score = score_as_english(data.bytes);
         if (score < min_score) {
             min_score = score;
             best_key = key;
         }
         key += 1;
+        data.reset_bytes();
     }
 
     return KeyScore{ .key = best_key, .score = min_score };
@@ -121,17 +165,6 @@ pub fn xor_bytes(src: []const u8, dst: []u8) !void {
         dst[index] = dst[index] ^ src[index];
         index += 1;
     }
-}
-
-pub fn xor_byte(allocator: std.mem.Allocator, src: []u8, key: u8) ![]u8 {
-    const out_buffer = try allocator.alloc(u8, src.len);
-
-    var index: u8 = 0;
-    while (index < src.len) {
-        out_buffer[index] = src[index] ^ key;
-        index += 1;
-    }
-    return out_buffer;
 }
 
 pub fn hex_string_to_bytes(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
@@ -373,9 +406,11 @@ test "Single Byte XOR Cryptopals" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const encoded_string = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
+    const input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
 
-    const result = try min_score_single_byte_xor(allocator, encoded_string);
+    const data = try BinaryData.from_hex_string(allocator, input);
+
+    const result = key_search_single_byte_xor(data);
 
     try std.testing.expectEqual(result.key, 88);
 }
@@ -387,7 +422,9 @@ test "Winning Line From Challenge 4" {
 
     const input = "7b5a4215415d544115415d5015455447414c155c46155f4058455c5b523f";
 
-    const result = try min_score_single_byte_xor(allocator, input);
+    const data = try BinaryData.from_hex_string(allocator, input);
+
+    const result = key_search_single_byte_xor(data);
 
     try std.testing.expectEqual(result.key, 21);
 }
