@@ -2,27 +2,61 @@ const std = @import("std");
 
 const base_64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
-const expected_english_frequencies = [27]f32{ 0.082, 0.015, 0.028, 0.043, 0.13, 0.022, 0.02, 0.061, 0.07, 0.015, 0.077, 0.04, 0.024, 0.067, 0.075, 0.019, 0.0095, 0.06, 0.063, 0.091, 0.028, 0.0098, 0.024, 0.015, 0.02, 0.074, 0 };
-
-const NON_CHAR_WEIGHT: f32 = 10;
-
 const KeyScore = struct {
     key: u8,
     score: f32,
 };
 
-pub fn main() anyerror!void {
+pub fn process_file_xor_single_byte() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const encoded_string = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
+    var file = try std.fs.cwd().openFile("4.txt", .{});
+    defer file.close();
 
-    _ = try min_score_single_byte_xor(allocator, encoded_string);
+    var buf_reader = std.io.bufferedReader(file.reader());
+    var reader = buf_reader.reader();
+
+    var buf: [1024]u8 = undefined;
+    var best_key_in_general: KeyScore = KeyScore{ .key = 0, .score = 1000000 };
+    var best_line: []u8 = undefined;
+
+    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        const best_key = try min_score_single_byte_xor(allocator, line);
+
+        if (best_key.score < best_key_in_general.score) {
+            best_key_in_general = best_key;
+            var line_copy = try allocator.alloc(u8, line.len);
+            std.mem.copy(u8, line_copy, line);
+            best_line = line_copy;
+        }
+    }
+
+    const line_bytes = try hex_string_to_bytes(allocator, best_line);
+    const decoded = try xor_byte(allocator, line_bytes, best_key_in_general.key);
+    try print(decoded);
+}
+
+pub fn print(encoded_string: []const u8) !void {
+    const out = std.io.getStdOut();
+    var writer = out.writer();
+    for (encoded_string) |byte_val| {
+        try writer.print("{c}", .{byte_val});
+    }
+    try writer.print("\n", .{});
+}
+
+pub fn main() anyerror!void {
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // defer arena.deinit();
+    // const allocator = arena.allocator();
+
+    try process_file_xor_single_byte();
 }
 
 pub fn min_score_single_byte_xor(allocator: std.mem.Allocator, encoded_string: []const u8) !KeyScore {
-    const encoded_bytes = try hex_string_to_bytes(allocator, encoded_string[0..]);
+    const encoded_bytes = try hex_string_to_bytes(allocator, encoded_string);
 
     var key: u8 = 0;
     var min_score: f32 = 1000000;
@@ -107,12 +141,10 @@ pub fn hex_string_to_bytes(allocator: std.mem.Allocator, hex_str: []const u8) ![
             char_val = 10 + (char - 'a');
         }
 
-        std.log.debug("char_val: {}", .{char_val});
         if (pos == 0) {
             buffer = char_val << 4;
         } else if (pos == 1) {
             buffer = buffer | (char_val & 15);
-            std.log.debug("byte: {x}", .{buffer});
             out_buffer[out_pos] = buffer;
             out_pos += 1;
         }
@@ -122,7 +154,6 @@ pub fn hex_string_to_bytes(allocator: std.mem.Allocator, hex_str: []const u8) ![
     if (pos != 0) {
         std.log.debug("odd number of digits in hex string, left padding final digit with 0", .{});
         buffer = buffer >> 4;
-        std.log.debug("byte: {x}", .{buffer});
         out_buffer[out_pos] = buffer;
     }
     return out_buffer;
@@ -150,7 +181,6 @@ pub fn octets_to_sextets(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 
         sextet_val = (buffer | (byte_val >> rshifts[pos]));
         buffer = (byte_val & masks[pos]) << lshifts[pos];
         out_buffer[out_pos] = sextet_val;
-        std.log.debug("sextet_val: {c}", .{base_64_alphabet[sextet_val]});
 
         if (pos == 2) {
             out_pos += 1;
@@ -164,13 +194,11 @@ pub fn octets_to_sextets(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 
     }
 
     if (pos != 0 and bytes.len != 0) {
-        std.log.debug("sextet_val: {c}", .{base_64_alphabet[buffer]});
         out_buffer[out_pos] = buffer;
         out_pos += 1;
     }
 
     while (pos != 0 and pos < 3) {
-        std.log.debug("sextet_val: {c}", .{base_64_alphabet[64]});
         out_buffer[out_pos] = 64;
         out_pos += 1;
         pos += 1;
@@ -335,4 +363,16 @@ test "Single Byte XOR Cryptopals" {
     const result = try min_score_single_byte_xor(allocator, encoded_string);
 
     try std.testing.expectEqual(result.key, 88);
+}
+
+test "Winning Line From Challenge 4" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const input = "7b5a4215415d544115415d5015455447414c155c46155f4058455c5b523f";
+
+    const result = try min_score_single_byte_xor(allocator, input);
+
+    try std.testing.expectEqual(result.key, 21);
 }
