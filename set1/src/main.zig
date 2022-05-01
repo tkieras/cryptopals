@@ -288,8 +288,8 @@ pub fn hamming_distance(a: []const u8, b: []const u8) !u32 {
     return total;
 }
 
-pub fn key_search_multi_byte_xor(allocator: std.mem.Allocator, data: BinaryData) !ScoredMultiByteKey {
-    const keysizes = try guess_keysizes(allocator, data);
+pub fn key_search_multi_byte_xor(allocator: std.mem.Allocator, data: BinaryData, max_keysize: u8) !ScoredMultiByteKey {
+    const keysizes = try guess_keysizes(allocator, data, max_keysize);
 
     var default_key: [2]u8 = [2]u8{ 0, 0 };
     var best_key = ScoredMultiByteKey{ .key = &default_key, .score = 1e5 };
@@ -332,15 +332,16 @@ pub fn key_search_multi_byte_xor(allocator: std.mem.Allocator, data: BinaryData)
     return best_key;
 }
 
-pub fn guess_keysizes(allocator: std.mem.Allocator, data: BinaryData) ![]u8 {
-    const num_guesses: usize = 5;
-    var guess_scores = [_]f32{1e5} ** num_guesses;
-    var guesses: []u8 = try allocator.alloc(u8, num_guesses);
-
-    const max_guess: u8 = 40;
+pub fn guess_keysizes(allocator: std.mem.Allocator, data: BinaryData, max_guess: u8) ![]u8 {
+    const iters: usize = @minimum(@divFloor(data.bytes.len, (2 * max_guess)), 4);
+    var guess_scores = try allocator.alloc(f32, iters);
+    for (guess_scores) |*score| {
+        score.* = 1e5;
+    }
+    var guesses: []u8 = try allocator.alloc(u8, iters);
     var keysize: u8 = 2;
-    const iters: u8 = 6;
     var total_dist: f32 = undefined;
+    std.log.info("max_guess: {}, iters: {}, datasize: {}", .{ max_guess, iters, data.bytes.len });
 
     while (keysize < max_guess) : (keysize += 1) {
         var it: u8 = 0;
@@ -686,9 +687,43 @@ test "Challenge 6 Decrypt File" {
 
     const data = try raw_data.decode_from_base_64();
 
-    const scored_key = try key_search_multi_byte_xor(allocator, data);
+    const scored_key = try key_search_multi_byte_xor(allocator, data, 40);
 
     const expected = "Terminator X: Bring the noise";
 
     try std.testing.expectEqualSlices(u8, expected[0..], scored_key.key);
+}
+
+test "Encrypt Decrypt Cycle Short" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const input = "Hello, World! A short string might not work very well.";
+    const key = "hi";
+
+    const plaintext_data = try BinaryData.from_bytes(allocator, input);
+    plaintext_data.apply_repeating_byte_key(key);
+    const data = try BinaryData.from_bytes(allocator, plaintext_data.bytes);
+
+    const scored_key = try key_search_multi_byte_xor(allocator, data, 10);
+
+    try std.testing.expectEqualSlices(u8, key[0..], scored_key.key);
+}
+
+test "Encrypt Decrypt Cycle A Little Longer" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const input = "Hello, World! A short string might not work very well. I'll just add some more text here. This test will test when there is more text in the string to encrypt, and also it will add more bytes to the key to discover.";
+    const key = "snowballs";
+
+    const plaintext_data = try BinaryData.from_bytes(allocator, input);
+    plaintext_data.apply_repeating_byte_key(key);
+    const data = try BinaryData.from_bytes(allocator, plaintext_data.bytes);
+
+    const scored_key = try key_search_multi_byte_xor(allocator, data, 10);
+
+    try std.testing.expectEqualSlices(u8, key[0..], scored_key.key);
 }
