@@ -2,6 +2,25 @@ const std = @import("std");
 
 const base_64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
+const base_64_alphabet_inverse = [256]u8{
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 62, 64, 64, 64, 63, //47
+    52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64, 64, 64, 64, 64, //63
+    64, 00, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14,
+    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64, //95
+    64, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 64, 64, 64, 64, 64, //127
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
+};
+
 const ScoredSingleByteKey = struct {
     key: u8,
     score: f32,
@@ -192,20 +211,7 @@ pub fn octets_to_sextets(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 
     return out_buffer;
 }
 
-pub fn base_64_to_sextets(allocator: std.mem.Allocator, base_64_string: []const u8) ![]u8 {
-    var base_64_alphabet_inverse = std.AutoHashMap(u8, u8).init(allocator);
-    for (base_64_alphabet) |char, i| {
-        try base_64_alphabet_inverse.put(char, @intCast(u8, i));
-    }
-    const sextets = try allocator.alloc(u8, base_64_string.len);
-
-    for (base_64_string) |char, i| {
-        sextets[i] = base_64_alphabet_inverse.get(char).?;
-    }
-    return sextets;
-}
-
-pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []u8) ![]u8 {
     var out_length: usize = @divFloor(input.len, 4);
 
     out_length *= 3;
@@ -221,8 +227,6 @@ pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 
 
     const octets = try allocator.alloc(u8, out_length);
 
-    const sextets = try base_64_to_sextets(allocator, input);
-
     var pos: u8 = 0;
     var buffer: u8 = 0;
     const take_masks = [_]u8{ 0x3F, 0x30, 0x3C, 0x3F };
@@ -232,7 +236,8 @@ pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 
     var octet_val: u8 = 0;
     var out_pos: usize = 0;
 
-    for (sextets) |sextet_val| {
+    for (input) |char| {
+        const sextet_val = base_64_alphabet_inverse[char];
         if (pos == 0) {
             buffer = (sextet_val & take_masks[pos]) << lshifts[pos];
         } else {
@@ -252,7 +257,20 @@ pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 
 }
 
 pub fn main() anyerror!void {
-    std.log.info("Nothing to do!", .{});
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    // std.log.info("Nothing to do!", .{});
+
+    const raw_data_split = try load_file(allocator, "6.txt");
+
+    const raw_data = try BinaryData.from_byte_arrays(allocator, raw_data_split);
+
+    const timer = try std.time.Timer.start();
+
+    _ = try raw_data.decode_from_base_64();
+
+    std.log.info("Timer: {}", .{timer.read()});
 }
 
 pub fn search_list_for_xor_single_byte(allocator: std.mem.Allocator, list: std.ArrayList([]u8)) !BinaryData {
@@ -341,7 +359,6 @@ pub fn guess_keysizes(allocator: std.mem.Allocator, data: BinaryData, max_guess:
     var guesses: []u8 = try allocator.alloc(u8, iters);
     var keysize: u8 = 2;
     var total_dist: f32 = undefined;
-    std.log.info("max_guess: {}, iters: {}, datasize: {}", .{ max_guess, iters, data.bytes.len });
 
     while (keysize < max_guess) : (keysize += 1) {
         var it: u8 = 0;
@@ -437,10 +454,10 @@ test "Sextets to Octets 3" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const input = "TWFu";
+    var input = [_]u8{ 'T', 'W', 'F', 'u' };
     const expected = [_]u8{ 0x4d, 0x61, 0x6e };
 
-    const result = try base_64_to_octets(allocator, input);
+    const result = try base_64_to_octets(allocator, input[0..]);
 
     try std.testing.expectEqualSlices(u8, expected[0..], result[0..]);
 }
@@ -449,10 +466,10 @@ test "Sextets to Octets 2" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const input = "TWE=";
+    var input = [_]u8{ 'T', 'W', 'E', '=' };
     const expected = [_]u8{ 0x4d, 0x61 };
 
-    const result = try base_64_to_octets(allocator, input);
+    const result = try base_64_to_octets(allocator, input[0..]);
 
     try std.testing.expectEqualSlices(u8, expected[0..], result[0..]);
 }
@@ -460,25 +477,24 @@ test "Sextets to Octets 1" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const input = "TQ==";
+    var input = [_]u8{ 'T', 'Q', '=', '=' };
     const expected = [_]u8{0x4d};
 
-    const result = try base_64_to_octets(allocator, input);
+    const result = try base_64_to_octets(allocator, input[0..]);
 
     try std.testing.expectEqualSlices(u8, expected[0..], result[0..]);
 }
 
 test "Base64 to Sextets" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    const input = "ABC/=";
+    var input = [_]u8{ 'A', 'B', 'C', '/', '=' };
 
     const expected = [_]u8{ 0, 1, 2, 63, 64 };
 
-    const sextets = try base_64_to_sextets(allocator, input);
+    for (input) |char, i| {
+        input[i] = base_64_alphabet_inverse[char];
+    }
 
-    for (sextets) |sextet_val, i| {
+    for (input) |sextet_val, i| {
         try std.testing.expectEqual(expected[i], sextet_val);
     }
 }
