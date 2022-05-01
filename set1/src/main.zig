@@ -2,12 +2,12 @@ const std = @import("std");
 
 const base_64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
-const KeyScore = struct {
+const ScoredSingleByteKey = struct {
     key: u8,
     score: f32,
 };
 
-const KeyScoreSlice = struct {
+const ScoredMultiByteKey = struct {
     key: []u8,
     score: f32,
 };
@@ -103,208 +103,6 @@ pub fn load_file(allocator: std.mem.Allocator, path: []const u8) !std.ArrayList(
         try list.append(line_copy);
     }
     return list;
-}
-
-pub fn search_file_for_xor_single_byte(allocator: std.mem.Allocator, path: []const u8) !void {
-    const file_lines = try load_file(allocator, path);
-
-    var best_key_in_general: KeyScore = KeyScore{ .key = 0, .score = 1000000 };
-    var best_line: BinaryData = undefined;
-
-    for (file_lines.items) |line| {
-        const raw_data = try BinaryData.from_bytes(allocator, line);
-        const data = try raw_data.decode_from_hex();
-        const best_key = key_search_single_byte_xor(data);
-
-        if (best_key.score < best_key_in_general.score) {
-            best_key_in_general = best_key;
-            best_line = try raw_data.decode_from_hex();
-        }
-    }
-    best_line.apply_single_byte_key(best_key_in_general.key);
-    try best_line.print_ascii();
-}
-
-pub fn hamming_distance(a: []const u8, b: []const u8) !u32 {
-    if (a.len != b.len) {
-        return error.LengthError;
-    }
-    var index: u8 = 0;
-    var total: u32 = 0;
-
-    while (index < a.len) {
-        total += @popCount(u8, a[index] ^ b[index]);
-        index += 1;
-    }
-    return total;
-}
-
-pub fn main() anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    // const input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
-    // const data_1 = try BinaryData.from_hex_string(allocator, input);
-
-    // try data_1.print_hex();
-
-    // const result = key_search_single_byte_xor(data_1);
-
-    // std.log.info("result.key: {}", .{result.key});
-    // data_1.apply_single_byte_key(result.key);
-    // try data_1.print_ascii();
-
-    // try process_file_xor_single_byte();
-    // const input_4 = "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
-    // const data_4 = try BinaryData.from_bytes(allocator, input_4);
-    // data_4.apply_repeating_byte_key("ICE");
-    // try data_4.print_hex();
-
-    try search_file_for_xor_single_byte(allocator, "4.txt");
-
-    const raw_data_split = try load_file(allocator, "6.txt");
-
-    const raw_data = try BinaryData.from_byte_arrays(allocator, raw_data_split);
-
-    const data = try raw_data.decode_from_base_64();
-
-    const keysizes = try guess_keysizes(allocator, data);
-
-    var default_key: [2]u8 = [2]u8{ 0, 0 };
-    var best_key = KeyScoreSlice{ .key = &default_key, .score = 1000000 };
-
-    var idx: usize = 0;
-
-    for (keysizes) |keysize| {
-        idx = 0;
-        const transposed_size: usize = @divFloor(data.bytes.len, keysize) + 1;
-        var transposed_chunks: [][]u8 = try allocator.alloc([]u8, keysize);
-
-        while (idx < keysize) : (idx += 1) {
-            transposed_chunks[idx] = try allocator.alloc(u8, transposed_size);
-        }
-
-        idx = 0;
-
-        while (idx < data.bytes.len) : (idx += 1) {
-            transposed_chunks[idx % keysize][@divFloor(idx, keysize)] = data.bytes[idx];
-        }
-
-        var key: []u8 = try allocator.alloc(u8, keysize);
-
-        idx = 0;
-
-        while (idx < keysize) : (idx += 1) {
-            const chunked_data = try BinaryData.from_bytes(allocator, transposed_chunks[idx]);
-            const scored_key: KeyScore = key_search_single_byte_xor(chunked_data);
-            key[idx] = scored_key.key;
-        }
-
-        data.apply_repeating_byte_key(key);
-        const score: f32 = score_as_english(data.bytes);
-        data.reset_bytes();
-
-        if (score < best_key.score) {
-            best_key = KeyScoreSlice{ .key = key, .score = score };
-        }
-    }
-    data.apply_repeating_byte_key(best_key.key);
-    try data.print_ascii();
-}
-
-pub fn guess_keysizes(allocator: std.mem.Allocator, data: BinaryData) ![]u8 {
-    const num_guesses: usize = 5;
-    var guess_scores = [_]f32{1e5} ** num_guesses;
-    var guesses: []u8 = try allocator.alloc(u8, num_guesses);
-
-    const max_guess: u8 = 40;
-    var keysize: u8 = 2;
-    const iters: u8 = 6;
-    var total_dist: f32 = undefined;
-
-    while (keysize < max_guess) : (keysize += 1) {
-        var it: u8 = 0;
-        var start_a: u32 = 0;
-        var end_a: u32 = keysize;
-        var start_b: u32 = keysize;
-        var end_b: u32 = keysize + keysize;
-
-        while (it < iters) : (it += 1) {
-            const dist = try hamming_distance(data.bytes[start_a..end_a], data.bytes[start_b..end_b]);
-            start_a += keysize;
-            end_a += keysize;
-            start_b += keysize;
-            end_b += keysize;
-            total_dist += @intToFloat(f32, dist) / @intToFloat(f32, keysize);
-        }
-        var score: f32 = total_dist / @intToFloat(f32, iters);
-        total_dist = 0;
-
-        // in lieu of a proper min heap
-        var guess: u8 = keysize;
-        var idx: u8 = 0;
-        while (idx < guesses.len) : (idx += 1) {
-            if (score < guess_scores[idx]) {
-                var tmp_score: f32 = guess_scores[idx];
-                var tmp_guess: u8 = guesses[idx];
-                guess_scores[idx] = score;
-                guesses[idx] = guess;
-                score = tmp_score;
-                guess = tmp_guess;
-            }
-        }
-    }
-
-    return guesses;
-}
-
-pub fn key_search_single_byte_xor(data: BinaryData) KeyScore {
-    var key: u8 = 0;
-    var min_score: f32 = 1000000;
-    var best_key: u8 = 0;
-
-    while (key < 0xFF) {
-        data.apply_single_byte_key(key);
-
-        const score = score_as_english(data.bytes);
-        if (score < min_score) {
-            min_score = score;
-            best_key = key;
-        }
-        key += 1;
-        data.reset_bytes();
-    }
-
-    return KeyScore{ .key = best_key, .score = min_score };
-}
-
-pub fn score_as_english(bytes: []const u8) f32 {
-    var total: i32 = 0;
-
-    for (bytes) |char| {
-        var score: i8 = switch (char) {
-            'e', 'E', 't', 'T', 'a', 'A', 'o', 'O' => 2,
-            'i', 'I', 'n', 'N', ' ', 's', 'S', 'h', 'H', 'r', 'R', 'd', 'D', 'l', 'L', 'u', 'U' => 1,
-            else => -1,
-        };
-        total += score;
-    }
-    if (total < 0) {
-        total = 0;
-    }
-    return 1 / @intToFloat(f32, total);
-}
-
-pub fn xor_bytes(src: []const u8, dst: []u8) !void {
-    if (src.len != dst.len) {
-        return error.LengthError;
-    }
-    var index: u8 = 0;
-    while (index < src.len) {
-        dst[index] = dst[index] ^ src[index];
-        index += 1;
-    }
 }
 
 pub fn hex_string_to_bytes(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
@@ -451,6 +249,181 @@ pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []const u8) ![]u8 
     }
 
     return octets;
+}
+
+pub fn main() anyerror!void {
+    std.log.info("Nothing to do!", .{});
+}
+
+pub fn search_list_for_xor_single_byte(allocator: std.mem.Allocator, list: std.ArrayList([]u8)) !BinaryData {
+    var best_key_in_general: ScoredSingleByteKey = ScoredSingleByteKey{ .key = 0, .score = 1e5 };
+    var best_item: BinaryData = undefined;
+
+    for (list.items) |item| {
+        const raw_data = try BinaryData.from_bytes(allocator, item);
+        const data = try raw_data.decode_from_hex();
+        const best_key = key_search_single_byte_xor(data);
+
+        if (best_key.score < best_key_in_general.score) {
+            best_key_in_general = best_key;
+            best_item = try raw_data.decode_from_hex();
+        }
+    }
+    best_item.apply_single_byte_key(best_key_in_general.key);
+
+    return best_item;
+}
+
+pub fn hamming_distance(a: []const u8, b: []const u8) !u32 {
+    if (a.len != b.len) {
+        return error.LengthError;
+    }
+    var index: u8 = 0;
+    var total: u32 = 0;
+
+    while (index < a.len) {
+        total += @popCount(u8, a[index] ^ b[index]);
+        index += 1;
+    }
+    return total;
+}
+
+pub fn key_search_multi_byte_xor(allocator: std.mem.Allocator, data: BinaryData) !ScoredMultiByteKey {
+    const keysizes = try guess_keysizes(allocator, data);
+
+    var default_key: [2]u8 = [2]u8{ 0, 0 };
+    var best_key = ScoredMultiByteKey{ .key = &default_key, .score = 1e5 };
+
+    var idx: usize = 0;
+
+    for (keysizes) |keysize| {
+        idx = 0;
+        const transposed_size: usize = @divFloor(data.bytes.len, keysize) + 1;
+        var transposed_chunks: [][]u8 = try allocator.alloc([]u8, keysize);
+
+        while (idx < keysize) : (idx += 1) {
+            transposed_chunks[idx] = try allocator.alloc(u8, transposed_size);
+        }
+
+        idx = 0;
+
+        while (idx < data.bytes.len) : (idx += 1) {
+            transposed_chunks[idx % keysize][@divFloor(idx, keysize)] = data.bytes[idx];
+        }
+
+        var key: []u8 = try allocator.alloc(u8, keysize);
+
+        idx = 0;
+
+        while (idx < keysize) : (idx += 1) {
+            const chunked_data = try BinaryData.from_bytes(allocator, transposed_chunks[idx]);
+            const scored_key: ScoredSingleByteKey = key_search_single_byte_xor(chunked_data);
+            key[idx] = scored_key.key;
+        }
+
+        data.apply_repeating_byte_key(key);
+        const score: f32 = score_as_english(data.bytes);
+        data.reset_bytes();
+
+        if (score < best_key.score) {
+            best_key = ScoredMultiByteKey{ .key = key, .score = score };
+        }
+    }
+    return best_key;
+}
+
+pub fn guess_keysizes(allocator: std.mem.Allocator, data: BinaryData) ![]u8 {
+    const num_guesses: usize = 5;
+    var guess_scores = [_]f32{1e5} ** num_guesses;
+    var guesses: []u8 = try allocator.alloc(u8, num_guesses);
+
+    const max_guess: u8 = 40;
+    var keysize: u8 = 2;
+    const iters: u8 = 6;
+    var total_dist: f32 = undefined;
+
+    while (keysize < max_guess) : (keysize += 1) {
+        var it: u8 = 0;
+        var start_a: u32 = 0;
+        var end_a: u32 = keysize;
+        var start_b: u32 = keysize;
+        var end_b: u32 = keysize + keysize;
+
+        while (it < iters) : (it += 1) {
+            const dist = try hamming_distance(data.bytes[start_a..end_a], data.bytes[start_b..end_b]);
+            start_a += keysize;
+            end_a += keysize;
+            start_b += keysize;
+            end_b += keysize;
+            total_dist += @intToFloat(f32, dist) / @intToFloat(f32, keysize);
+        }
+        var score: f32 = total_dist / @intToFloat(f32, iters);
+        total_dist = 0;
+
+        // in lieu of a proper min heap
+        var guess: u8 = keysize;
+        var idx: u8 = 0;
+        while (idx < guesses.len) : (idx += 1) {
+            if (score < guess_scores[idx]) {
+                var tmp_score: f32 = guess_scores[idx];
+                var tmp_guess: u8 = guesses[idx];
+                guess_scores[idx] = score;
+                guesses[idx] = guess;
+                score = tmp_score;
+                guess = tmp_guess;
+            }
+        }
+    }
+
+    return guesses;
+}
+
+pub fn key_search_single_byte_xor(data: BinaryData) ScoredSingleByteKey {
+    var key: u8 = 0;
+    var min_score: f32 = 1000000;
+    var best_key: u8 = 0;
+
+    while (key < 0xFF) {
+        data.apply_single_byte_key(key);
+
+        const score = score_as_english(data.bytes);
+        if (score < min_score) {
+            min_score = score;
+            best_key = key;
+        }
+        key += 1;
+        data.reset_bytes();
+    }
+
+    return ScoredSingleByteKey{ .key = best_key, .score = min_score };
+}
+
+pub fn score_as_english(bytes: []const u8) f32 {
+    var total: i32 = 0;
+
+    for (bytes) |char| {
+        var score: i8 = switch (char) {
+            'e', 'E', 't', 'T', 'a', 'A', 'o', 'O' => 2,
+            'i', 'I', 'n', 'N', ' ', 's', 'S', 'h', 'H', 'r', 'R', 'd', 'D', 'l', 'L', 'u', 'U' => 1,
+            else => -1,
+        };
+        total += score;
+    }
+    if (total < 0) {
+        total = 0;
+    }
+    return 1 / @intToFloat(f32, total);
+}
+
+pub fn xor_bytes(src: []const u8, dst: []u8) !void {
+    if (src.len != dst.len) {
+        return error.LengthError;
+    }
+    var index: u8 = 0;
+    while (index < src.len) {
+        dst[index] = dst[index] ^ src[index];
+        index += 1;
+    }
 }
 
 test "Hamming Distance" {
@@ -686,4 +659,36 @@ test "Winning Line From Challenge 4" {
     const result = key_search_single_byte_xor(data);
 
     try std.testing.expectEqual(result.key, 53);
+}
+
+test "Challenge 4 Search File" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const list = try load_file(allocator, "4.txt");
+
+    const winning_line_plaintext = try search_list_for_xor_single_byte(allocator, list);
+
+    const expected = "Now that the party is jumping\n";
+
+    try std.testing.expectEqualSlices(u8, expected[0..], winning_line_plaintext.bytes);
+}
+
+test "Challenge 6 Decrypt File" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const raw_data_split = try load_file(allocator, "6.txt");
+
+    const raw_data = try BinaryData.from_byte_arrays(allocator, raw_data_split);
+
+    const data = try raw_data.decode_from_base_64();
+
+    const scored_key = try key_search_multi_byte_xor(allocator, data);
+
+    const expected = "Terminator X: Bring the noise";
+
+    try std.testing.expectEqualSlices(u8, expected[0..], scored_key.key);
 }
