@@ -32,13 +32,6 @@ const BinaryData = struct {
             self.bytes[i] = byte_val;
         }
     }
-    fn from_hex_string(allocator: std.mem.Allocator, hex_str: []const u8) !BinaryData {
-        const bytes = try hex_string_to_bytes(allocator, hex_str);
-        const bytes_const = try allocator.alloc(u8, bytes.len);
-        std.mem.copy(u8, bytes_const, bytes);
-        const result = BinaryData{ .bytes = bytes, ._bytes = bytes_const, .allocator = allocator };
-        return result;
-    }
     fn from_bytes(allocator: std.mem.Allocator, bytes: []const u8) !BinaryData {
         const bytes_var = try allocator.alloc(u8, bytes.len);
         std.mem.copy(u8, bytes_var, bytes);
@@ -63,6 +56,15 @@ const BinaryData = struct {
         return BinaryData.from_bytes(allocator, bytes);
     }
 
+    fn decode_from_base_64(self: *const BinaryData) !BinaryData {
+        const bytes = try base_64_to_octets(self.allocator, self.bytes);
+        return BinaryData.from_bytes(self.allocator, bytes);
+    }
+    fn decode_from_hex(self: *const BinaryData) !BinaryData {
+        const bytes = try hex_string_to_bytes(self.allocator, self.bytes);
+        return BinaryData.from_bytes(self.allocator, bytes);
+    }
+
     fn print_hex(self: *const BinaryData) !void {
         const out = std.io.getStdOut();
 
@@ -75,9 +77,14 @@ const BinaryData = struct {
     }
 
     fn print_ascii(self: *const BinaryData) !void {
+        const out = std.io.getStdOut();
+
+        var writer = out.writer();
+
         for (self.bytes) |byte_val| {
-            std.debug.print("{c}", .{byte_val});
+            try writer.print("{c}", .{byte_val});
         }
+        try writer.print("\n", .{});
     }
 };
 
@@ -105,12 +112,13 @@ pub fn search_file_for_xor_single_byte(allocator: std.mem.Allocator, path: []con
     var best_line: BinaryData = undefined;
 
     for (file_lines.items) |line| {
-        const data = try BinaryData.from_hex_string(allocator, line);
+        const raw_data = try BinaryData.from_bytes(allocator, line);
+        const data = try raw_data.decode_from_hex();
         const best_key = key_search_single_byte_xor(data);
 
         if (best_key.score < best_key_in_general.score) {
             best_key_in_general = best_key;
-            best_line = try BinaryData.from_hex_string(allocator, line);
+            best_line = try raw_data.decode_from_hex();
         }
     }
     best_line.apply_single_byte_key(best_key_in_general.key);
@@ -153,14 +161,13 @@ pub fn main() anyerror!void {
     // data_4.apply_repeating_byte_key("ICE");
     // try data_4.print_hex();
 
-    //   try search_file_for_xor_single_byte(allocator, "4.txt");
+    try search_file_for_xor_single_byte(allocator, "4.txt");
 
-    const lines = try load_file(allocator, "6.txt");
+    const raw_data_split = try load_file(allocator, "6.txt");
 
-    const base64_encoded_data = try BinaryData.from_byte_arrays(allocator, lines);
-    const decoded_base64_data = try base_64_to_octets(allocator, base64_encoded_data.bytes);
+    const raw_data = try BinaryData.from_byte_arrays(allocator, raw_data_split);
 
-    const data = try BinaryData.from_bytes(allocator, decoded_base64_data);
+    const data = try raw_data.decode_from_base_64();
 
     const keysizes = try guess_keysizes(allocator, data);
 
@@ -170,7 +177,6 @@ pub fn main() anyerror!void {
     var idx: usize = 0;
 
     for (keysizes) |keysize| {
-        std.log.debug("keysize: {}", .{keysize});
         idx = 0;
         const transposed_size: usize = @divFloor(data.bytes.len, keysize) + 1;
         var transposed_chunks: [][]u8 = try allocator.alloc([]u8, keysize);
@@ -198,7 +204,6 @@ pub fn main() anyerror!void {
         data.apply_repeating_byte_key(key);
         const score: f32 = score_as_english(data.bytes);
         data.reset_bytes();
-        std.log.debug("best_key.len {}, best_key.score {} score: {}", .{ best_key.key.len, best_key.score, score });
 
         if (score < best_key.score) {
             best_key = KeyScoreSlice{ .key = key, .score = score };
@@ -209,7 +214,7 @@ pub fn main() anyerror!void {
 }
 
 pub fn guess_keysizes(allocator: std.mem.Allocator, data: BinaryData) ![]u8 {
-    const num_guesses: usize = 2;
+    const num_guesses: usize = 5;
     var guess_scores = [_]f32{1e5} ** num_guesses;
     var guesses: []u8 = try allocator.alloc(u8, num_guesses);
 
@@ -658,7 +663,9 @@ test "Single Byte XOR Cryptopals" {
 
     const input = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
 
-    const data = try BinaryData.from_hex_string(allocator, input);
+    const raw_data = try BinaryData.from_bytes(allocator, input);
+
+    const data = try raw_data.decode_from_hex();
 
     const result = key_search_single_byte_xor(data);
 
@@ -672,7 +679,9 @@ test "Winning Line From Challenge 4" {
 
     const input = "7b5a4215415d544115415d5015455447414c155c46155f4058455c5b523f";
 
-    const data = try BinaryData.from_hex_string(allocator, input);
+    const raw_data = try BinaryData.from_bytes(allocator, input);
+
+    const data = try raw_data.decode_from_hex();
 
     const result = key_search_single_byte_xor(data);
 
