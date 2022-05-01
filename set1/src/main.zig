@@ -152,6 +152,44 @@ pub fn main() anyerror!void {
     const bytes = try base_64_to_octets(allocator, base64_encoded_data);
 
     const data = try BinaryData.from_bytes(allocator, bytes);
+
+    const keysize = try guess_keysize(data);
+    std.log.debug("working keysize: {}", .{keysize});
+}
+
+pub fn guess_keysize(data: BinaryData) !u8 {
+    const max_guess: u8 = 40;
+    var keysize: u8 = 2;
+    const iters: u8 = 6;
+    var total_dist: f32 = undefined;
+    var best_score: f32 = 10000000;
+    var best_keysize: u8 = undefined;
+
+    while (keysize < max_guess) : (keysize += 1) {
+        var it: u8 = 0;
+        var start_a: u32 = 0;
+        var end_a: u32 = keysize;
+        var start_b: u32 = keysize;
+        var end_b: u32 = keysize + keysize;
+
+        while (it < iters) : (it += 1) {
+            const dist = try hamming_distance(data.bytes[start_a..end_a], data.bytes[start_b..end_b]);
+            start_a += keysize;
+            end_a += keysize;
+            start_b += keysize;
+            end_b += keysize;
+            total_dist += @intToFloat(f32, dist) / @intToFloat(f32, keysize);
+        }
+        var score: f32 = total_dist / @intToFloat(f32, iters);
+        total_dist = 0;
+
+        if (score < best_score) {
+            best_score = score;
+            best_keysize = keysize;
+        }
+    }
+
+    return best_keysize;
 }
 
 pub fn key_search_single_byte_xor(data: BinaryData) KeyScore {
