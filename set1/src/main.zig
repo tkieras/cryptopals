@@ -47,9 +47,7 @@ const BinaryData = struct {
         }
     }
     fn reset_bytes(self: *const BinaryData) void {
-        for (self._bytes) |byte_val, i| {
-            self.bytes[i] = byte_val;
-        }
+        std.mem.copy(u8, self.bytes, self._bytes);
     }
     fn from_bytes(allocator: std.mem.Allocator, bytes: []const u8) !BinaryData {
         const bytes_var = try allocator.alloc(u8, bytes.len);
@@ -260,17 +258,16 @@ pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
+    const out = std.io.getStdOut().writer();
     // std.log.info("Nothing to do!", .{});
 
-    const raw_data_split = try load_file(allocator, "6.txt");
-
-    const raw_data = try BinaryData.from_byte_arrays(allocator, raw_data_split);
+    const list = try load_file(allocator, "4.txt");
 
     const timer = try std.time.Timer.start();
 
-    _ = try raw_data.decode_from_base_64();
+    _ = try search_list_for_xor_single_byte(allocator, list);
 
-    std.log.info("Timer: {}", .{timer.read()});
+    try out.print("Timer: {}\n", .{timer.read()});
 }
 
 pub fn search_list_for_xor_single_byte(allocator: std.mem.Allocator, list: std.ArrayList([]u8)) !BinaryData {
