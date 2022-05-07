@@ -13,7 +13,8 @@ pub fn build(b: *std.build.Builder) void {
 
     const tinyaes = b.addStaticLibrary("tinyaes", "lib/tiny-AES-c/aes.c");
 
-    const exe = b.addExecutable("set1", "src/main.zig");
+    const exe = b.addExecutable("cryptopals", "src/main.zig");
+    exe.addPackagePath("utils", "src/utils.zig");
     exe.addIncludeDir("lib/tiny-AES-c");
     exe.linkLibrary(tinyaes);
     exe.setTarget(target);
@@ -29,12 +30,19 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_tests = b.addTest("src/main.zig");
-    exe_tests.linkLibrary(tinyaes);
-    exe_tests.addIncludeDir("lib/tiny-AES-c");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
+    const utils_tests = b.addTest("src/utils.zig");
+    utils_tests.setTarget(target);
+    utils_tests.setBuildMode(mode);
+
+    const set1_tests = b.addTest("src/crypto/set1.zig");
+    set1_tests.addPackagePath("utils", "src/utils.zig");
+
+    set1_tests.addIncludeDir("lib/tiny-AES-c");
+    set1_tests.linkLibrary(tinyaes);
+    set1_tests.setTarget(target);
+    set1_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    test_step.dependOn(&utils_tests.step);
+    test_step.dependOn(&set1_tests.step);
 }
