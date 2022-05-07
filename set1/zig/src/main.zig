@@ -257,12 +257,40 @@ pub fn base_64_to_octets(allocator: std.mem.Allocator, input: []u8) ![]u8 {
 
 pub fn main() anyerror!void {
     
-    std.log.info("Nothing to do!", .{});
+   // std.log.info("Nothing to do!", .{});
 
     // const timer = try std.time.Timer.start();
+
     
 }
 
+pub fn search_list_for_aes_ecb_encryption(allocator: std.mem.Allocator, list: std.ArrayList([]u8)) !std.ArrayList(usize) {
+
+    var result_list = std.ArrayList(usize).init(allocator);
+
+    for (list.items) |item, i| {
+        const raw_data = try BinaryData.from_bytes(allocator, item);
+        const data = try raw_data.decode_from_hex();
+     
+        var idx: u32 = 0;
+        const block_size: u8 = 16;
+
+        var match: bool = false;
+
+        while(idx + (block_size * 2) < data.bytes.len) : (idx += block_size) {
+            var inner_idx: u32 = idx + block_size;
+            while(inner_idx + block_size < data.bytes.len) : (inner_idx += block_size) {                
+                if(std.mem.eql(u8, data.bytes[idx..idx+block_size], data.bytes[inner_idx..inner_idx+block_size])) {
+                    match = true;
+                }
+            }
+        }
+        if(match) {try result_list.append(i);}
+
+    }
+    return result_list;
+
+}
 pub fn search_list_for_xor_single_byte(allocator: std.mem.Allocator, list: std.ArrayList([]u8)) !BinaryData {
     var best_key_in_general: ScoredSingleByteKey = ScoredSingleByteKey{ .key = 0, .score = 1e5 };
     var best_item: BinaryData = undefined;
@@ -766,4 +794,17 @@ test "Decrypt AES ECB" {
     }
 
     try std.testing.expectEqualSlices(u8, data.bytes[0..expected.len], expected[0..]);
+}
+
+test "Detect AES ECB" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const raw_data_split = try load_file(allocator, "8.txt");
+
+    const result_list = try search_list_for_aes_ecb_encryption(allocator, raw_data_split);
+
+    try std.testing.expectEqual(@intCast(usize, 1), result_list.items.len);
+    try std.testing.expectEqual(result_list.items[0], 132);
 }
