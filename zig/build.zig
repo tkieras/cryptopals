@@ -42,7 +42,13 @@ pub fn build(b: *std.build.Builder) void {
     set1_tests.setTarget(target);
     set1_tests.setBuildMode(mode);
 
+    const set2_tests = b.addTest("src/crypto/set2.zig");
+    set2_tests.addPackagePath("utils", "src/utils.zig");
+    set2_tests.addIncludeDir("lib/tiny-AES-c");
+    set2_tests.linkLibrary(tinyaes);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&utils_tests.step);
     test_step.dependOn(&set1_tests.step);
+    test_step.dependOn(&set2_tests.step);
 }
