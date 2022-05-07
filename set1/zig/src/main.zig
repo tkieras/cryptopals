@@ -85,6 +85,20 @@ const BinaryData = struct {
         const bytes = try hex_string_to_bytes(self.allocator, self.bytes);
         return BinaryData.from_bytes(self.allocator, bytes);
     }
+    fn to_padded(self: *const BinaryData, keysize: u8) !BinaryData {
+        const data_size: usize = self.bytes.len;
+        const r: u8 = @intCast(u8, data_size % keysize);
+        const padding: u8 =  if (r > 0) keysize - r else 0;
+        const final_size: usize = data_size + padding;
+
+        var bytes = try self.allocator.alloc(u8, final_size);
+        std.mem.copy(u8, bytes, self.bytes);
+        var idx = data_size;
+        while(idx < final_size) : (idx += 1) {
+            bytes[idx] = padding;
+        }
+        return BinaryData.from_bytes(self.allocator, bytes);
+    }
 
     fn print_hex(self: *const BinaryData) !void {
         const out = std.io.getStdOut();
@@ -807,4 +821,66 @@ test "Detect AES ECB" {
 
     try std.testing.expectEqual(@intCast(usize, 1), result_list.items.len);
     try std.testing.expectEqual(result_list.items[0], 132);
+}
+
+test "Pad non multiple less" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const expected = [_]u8{'1', '2', '3', '4', '5', '6', '7', 0x01};
+
+    const input = try BinaryData.from_bytes(allocator, "1234567");
+
+    const output = try input.to_padded(8);
+
+    try std.testing.expectEqual(expected.len, output.bytes.len);
+    try std.testing.expectEqualSlices(u8, output.bytes[0..], expected[0..]);
+
+}
+
+test "Pad exact multiple" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const expected = "12345678";
+    const input = try BinaryData.from_bytes(allocator, "12345678");
+
+    const output = try input.to_padded(8);
+
+    try std.testing.expectEqual(expected.len, output.bytes.len);
+    try std.testing.expectEqualSlices(u8, output.bytes[0..], expected[0..]);
+}
+
+test "Pad non multiple more" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const expected = [_]u8{'1', '2', '3', '4', '5', '6', '7', '8', '9', 0x7, 0x7, 0x7, 0x7, 0x7, 0x7, 0x7};
+
+    const input = try BinaryData.from_bytes(allocator, "123456789");
+
+    const output = try input.to_padded(8);
+
+    try std.testing.expectEqual(expected.len, output.bytes.len);
+    try std.testing.expectEqualSlices(u8, output.bytes[0..], expected[0..]);
+
+}
+
+test "Pad example" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const expected = [_]u8{'Y','E','L','L','O','W',' ','S', 'U', 'B', 'M', 'A', 'R', 'I', 'N', 'E', 0x04, 0x04, 0x04, 0x04};
+
+    const input = try BinaryData.from_bytes(allocator, "YELLOW SUBMARINE");
+
+    const output = try input.to_padded(20);
+
+    try std.testing.expectEqual(expected.len, output.bytes.len);
+    try std.testing.expectEqualSlices(u8, output.bytes[0..], expected[0..]);
+
 }
