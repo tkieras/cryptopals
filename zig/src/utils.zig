@@ -92,7 +92,7 @@ pub const BinaryData = struct {
         var writer = out.writer();
 
         for (self.bytes) |byte_val| {
-            try writer.print("{x}", .{byte_val});
+            try writer.print(" {x} ", .{byte_val});
         }
         try writer.print("\n", .{});
     }
